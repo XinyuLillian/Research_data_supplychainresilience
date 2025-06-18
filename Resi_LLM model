@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.linear_model import LassoCV
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from sklearn.metrics import mean_squared_error, r2_score
+
+# Load CSV files for training
+train_data = pd.read_csv("lr1withstructureinformation.csv")
+
+# Separate features (X) and target variable (Y)
+X_train = train_data.drop(columns=["Y"])
+y_train = train_data["Y"]
+
+# Create MinMaxScaler object
+scaler = MinMaxScaler()
+
+# Scale the features using Min-Max scaling
+X_train_scaled = scaler.fit_transform(X_train)
+
+# Use LASSO regression for feature selection
+lasso = LassoCV(cv=5, max_iter=10000)  # Increase max iterations
+lasso.fit(X_train_scaled, y_train)
+
+# Select features with non-zero coefficients
+selected_features = X_train.columns[lasso.coef_ != 0]
+X_selected = X_train[selected_features]
+
+# Load CSV files for validation and testing
+val_test_data = pd.read_csv("lr2withstructureinformation.csv")
+
+# Split the data into validation and test sets 
+X_temp, X_test, y_temp, y_test = train_test_split(
+    val_test_data.drop(columns=["Y"]),
+    val_test_data["Y"],
+    test_size=0.1,
+    random_state=42
+)
+
+# Further split the test set into validation and test sets
+X_val, X_test, y_val, y_test = train_test_split(
+    X_test,
+    y_test,
+    test_size=0.5,
+    random_state=42
+)
+
+# Scale the features for validation and test sets using the same scaler from training
+X_val_scaled = scaler.transform(X_val)
+X_test_scaled = scaler.transform(X_test)
+
+# Ensure the features have the same dimensions as the features used for training
+X_val_scaled = X_val_scaled[:, lasso.coef_ != 0]
+X_test_scaled = X_test_scaled[:, lasso.coef_ != 0]
+
+# Convert Pandas Series to NumPy arrays
+y_train = y_train.values
+y_val = y_val.values
+y_test = y_test.values
+
+# Scale the selected features using Min-Max scaling
+X_selected_scaled = scaler.fit_transform(X_selected)
+
+# Define the neural network model
+model = tf.keras.Sequential([
+    tf.keras.layers.Input(shape=(X_selected_scaled.shape[1],)),  # Input layer
+    tf.keras.layers.Dense(128, activation='relu'),  # Hidden layer 1
+    tf.keras.layers.Dropout(rate=0.2),  # Dropout layer with a dropout rate of 0.2
+    tf.keras.layers.Dense(64, activation='relu'),  # Hidden layer 2
+    tf.keras.layers.Dropout(rate=0.2),  # Dropout layer with a dropout rate of 0.2
+    tf.keras.layers.Dense(1)  # Output layer
+])
+
+# Define the custom optimizer with a specific learning rate
+custom_optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+
+# Compile the model using the custom optimizer and mean squared error loss
+model.compile(optimizer=custom_optimizer, loss='mean_squared_error')
+
+# Train the model
+model.fit(X_selected_scaled, y_train, epochs=200, batch_size=192, validation_data=(X_val_scaled, y_val))
+
+# Evaluate the model performance on the test set
+y_test_pred = model.predict(X_test_scaled)
+mse_test = mean_squared_error(y_test, y_test_pred)
+print("Test Mean Squared Error (MSE):", mse_test)
+r_squared_test = r2_score(y_test, y_test_pred)
+print("Test R-squared (R²):", r_squared_test)
